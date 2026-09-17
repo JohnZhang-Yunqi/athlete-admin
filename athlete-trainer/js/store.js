@@ -8,14 +8,14 @@
     athletes: [],
     activeAthleteId: null,
     profile: {
-      name: '张筠骐',
+      name: '',
       event: '',
       team: '',
       coach: '',
       birth: '',
       sex: '',
-      height: 180,
-      weight: 64,
+      height: null,
+      weight: null,
       pbs: {},
       note: ''
     },
@@ -40,6 +40,15 @@
   }
   function cloneProfile(p) {
     return JSON.parse(JSON.stringify(p || defaults.profile));
+  }
+  function emptyState() {
+    const state = JSON.parse(JSON.stringify(defaults));
+    const id = uid();
+    const profile = Object.assign({ id: id }, cloneProfile(defaults.profile), { id: id });
+    state.athletes = [{ id: id, profile: profile, data: emptyData() }];
+    state.activeAthleteId = id;
+    state.profile = profile;
+    return state;
   }
 
   function uid() {
@@ -73,7 +82,7 @@
 
   function normBody(rec) {
     const metrics = {
-      weight: 'kg', neck: 'cm', shoulder: 'cm', chest: 'cm', waist: 'cm',
+      weight: 'kg', bodyFat: '%', neck: 'cm', shoulder: 'cm', chest: 'cm', waist: 'cm',
       hip: 'cm', thighL: 'cm', thighR: 'cm', calfL: 'cm', calfR: 'cm',
       armL: 'cm', armR: 'cm'
     };
@@ -89,7 +98,12 @@
     const rand = mulberry(20260801);
     const now = new Date();
     const data = JSON.parse(JSON.stringify(defaults));
-    data.profile = JSON.parse(JSON.stringify(defaults.profile));
+    data.profile = {
+      name: '示例运动员', event: '短跑 100m / 200m', team: '示例队', coach: '主教练',
+      birth: '2006-03-18', sex: '男', height: 179, weight: 64.5,
+      pbs: { '60m': '6.72', '100m': '10.84', '200m': '21.92', '跳远': '7.85' },
+      note: '示例数据，可在「数据管理」中清空。'
+    };
     const S = {};
 
     // 为每天生成一份确定性的伪随机序列
@@ -197,6 +211,7 @@
       const rec = {
         id: uid(), date: date,
         weight: +Math.max(61, bw).toFixed(1),
+        bodyFat: +(11.5 + rand() * 2).toFixed(1),
         neck: +(36.1 + rand() * 0.8).toFixed(1),
         shoulder: +(108 + rand() * 2).toFixed(1),
         chest: +(94 + rand() * 2).toFixed(1),
@@ -402,7 +417,7 @@
           return;
         } catch (e) { /* fallthrough 重建 */ }
       }
-      this.state = sampleData();
+      this.state = emptyState();
       this.save();
     },
     _syncCurrent: function () {
@@ -493,14 +508,8 @@
       this.changed();
     },
     clearAll: function () {
-      // 清空全部：保留一名空白默认运动员，数据全部为空
-      const id = uid();
-      const prof = Object.assign({ id: id }, cloneProfile(defaults.profile));
-      this.state = Object.assign({}, JSON.parse(JSON.stringify(defaults)), {
-        athletes: [{ id: id, profile: prof, data: emptyData() }],
-        activeAthleteId: id,
-        profile: prof
-      });
+      // 清空全部：保留一名空白运动员，数据全部为空
+      this.state = emptyState();
       this.changed();
     },
     exportJson: function () {

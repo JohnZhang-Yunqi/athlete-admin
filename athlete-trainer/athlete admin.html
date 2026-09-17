@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>运动员训练管理系统 · Athlete OS</title>
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/app.css?v=16">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 </head>
 <body>
@@ -18,6 +18,8 @@
       </div>
     </div>
     <nav class="nav" id="mainNav">
+      <div class="nav-group">运动员</div>
+      <button class="nav-item" data-view="athletes"><span>👥</span>运动员管理</button>
       <button class="nav-item active" data-view="dashboard"><span>📊</span>总览</button>
       <button class="nav-item" data-view="calendar"><span>📅</span>日历回看</button>
       <div class="nav-group">身体监控</div>
@@ -33,6 +35,7 @@
     </nav>
     <div class="sidebar-foot">
       <div class="ath-mini" id="athMini"></div>
+      <label class="ath-switch"><span>当前运动员</span><select id="athSwitch"></select></label>
     </div>
   </aside>
 
@@ -43,12 +46,14 @@
         <div class="page-sub" id="pageSub">最近 7 天训练与恢复状态</div>
       </div>
       <div class="topbar-actions">
+        <button class="btn btn-ghost" id="btnLang" title="中英文切换 / Switch language">EN</button>
         <button class="btn btn-ghost" id="btnQuickAdd">＋ 快速记录</button>
         <button class="btn btn-primary" id="btnExportPdf">导出 PDF 报告</button>
       </div>
     </header>
 
     <div class="view active" id="view-dashboard"><div class="page-content" id="content-dashboard"></div></div>
+    <div class="view" id="view-athletes"><div class="page-content" id="content-athletes"></div></div>
     <div class="view" id="view-calendar"><div class="page-content" id="content-calendar"></div></div>
     <div class="view" id="view-sleep"><div class="page-content" id="content-sleep"></div></div>
     <div class="view" id="view-heart"><div class="page-content" id="content-heart"></div></div>
@@ -71,14 +76,15 @@
 <div id="modalRoot"></div>
 <div id="toastRoot"></div>
 
-<script src="vendor/pdf-lib.min.js"></script>
-<script src="js/store.js"></script>
-<script src="js/charts.js"></script>
-<script src="js/analytics.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/views.js"></script>
-<script src="js/analysis-views.js"></script>
-<script src="js/pdf.js"></script>
-<script src="js/main.js"></script>
+<script src="vendor/pdf-lib.min.js?v=16"></script>
+<script src="js/store.js?v=16"></script>
+<script src="js/charts.js?v=16"></script>
+<script src="js/analytics.js?v=16"></script>
+<script src="js/ui.js?v=16"></script>
+<script src="js/i18n.js?v=16"></script>
+<script src="js/views.js?v=16"></script>
+<script src="js/analysis-views.js?v=16"></script>
+<script src="js/pdf.js?v=16"></script>
+<script src="js/main.js?v=16"></script>
 </body>
 </html>

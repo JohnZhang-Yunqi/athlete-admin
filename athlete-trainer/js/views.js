@@ -62,6 +62,90 @@
     return '<span class="' + cls + '">' + arrow + ' ' + fmtNum(Math.abs(d)) + ' ' + (unit || '') + '</span>';
   }
 
+  /* ========================= 智能健康分析 ========================= */
+  const HEALTH_LEVELS = [
+    { label: '恢复状态良好', color: '#16a34a', bg: '#e8f7ed', pill: 'green' },
+    { label: '需要关注', color: '#d97706', bg: '#fdf4e3', pill: 'amber' },
+    { label: '恢复预警', color: '#dc2626', bg: '#fdeaea', pill: 'red' },
+    { label: '高风险警告', color: '#991b1b', bg: '#fbe0e0', pill: 'red' }
+  ];
+  Views.healthLevelMeta = function (level) { return HEALTH_LEVELS[Math.max(0, Math.min(3, level))]; };
+
+  Views.healthCardHtml = function (h) {
+    const meta = Views.healthLevelMeta(h.level);
+    const factors = h.factors.filter(function (f) { return f.sev > 0; });
+    const mainFactors = (factors.length ? factors : h.factors).slice(0, 4);
+    return '<div class="card" style="margin-bottom:14px;border-left:5px solid ' + meta.color + ';background:' + meta.bg + '">' +
+      '<div class="card-head"><h3>🧠 智能健康分析</h3><span class="pill ' + meta.pill + '">' + meta.label + ' · ' + h.score + ' 分</span></div>' +
+      '<div class="row" style="align-items:flex-start;gap:18px">' +
+      '<div style="min-width:110px"><div style="font-size:34px;font-weight:800;line-height:1.1;color:' + meta.color + '">' + h.score + '</div>' +
+      '<div class="small muted">健康评分（0–100）</div></div>' +
+      '<div style="flex:1;min-width:220px">' +
+      '<div class="small bold">主要发现</div>' +
+      mainFactors.map(function (f) {
+        return '<div class="mini-row" style="align-items:flex-start"><span style="color:' + Views.healthLevelMeta(f.sev).color + '">●</span><span><b>' + UI.esc(f.title) + '</b>' + (f.detail ? '：' + UI.esc(f.detail) : '') + '</span></div>';
+      }).join('') +
+      '<div class="small bold" style="margin-top:8px">建议</div>' +
+      h.advice.map(function (a) { return '<div class="mini-row" style="align-items:flex-start"><span>•</span><span>' + UI.esc(a) + '</span></div>'; }).join('') +
+      '</div></div>' +
+      '<div class="row" style="margin-top:10px">' +
+      '<button class="btn btn-sm healthNotifyBtn">开启系统提醒</button>' +
+      '<span class="small muted">出现恢复预警时自动弹窗提醒，并可发送系统通知</span>' +
+      '</div></div>';
+  };
+
+  Views.bindHealthNotify = function (root) {
+    (root || document).querySelectorAll('.healthNotifyBtn').forEach(function (btn) {
+      btn.onclick = function () {
+        if (!('Notification' in window)) { UI.toast('当前浏览器不支持系统提醒', 'err'); return; }
+        if (Notification.permission === 'granted') {
+          Store.state.settings.browserNotify = true; Store.changed();
+          UI.toast('系统提醒已开启', 'ok');
+          return;
+        }
+        Notification.requestPermission().then(function (p) {
+          if (p === 'granted') {
+            Store.state.settings.browserNotify = true; Store.changed();
+            UI.toast('系统提醒已开启', 'ok');
+          } else {
+            UI.toast('未获得通知权限，仍会使用页面内预警', 'err');
+          }
+        });
+      };
+    });
+  };
+
+  Views.checkHealthAlert = function () {
+    const h = Analytics.healthAnalysis(Store.state);
+    if (h.level < 2) return;
+    const meta = Views.healthLevelMeta(h.level);
+    const factors = h.factors.filter(function (f) { return f.sev > 0; });
+    const key = 'athlete-os-health-alert-date';
+    let last = null;
+    try { last = localStorage.getItem(key); } catch (e) { last = null; }
+    if (last === Store.today()) return;
+    try { localStorage.setItem(key, Store.today()); } catch (e) { /* ignore */ }
+
+    if (Store.state.settings.browserNotify && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        new Notification('恢复预警', { body: factors.length ? factors[0].title + '：' + factors[0].detail : '存在恢复风险，请查看智能健康分析。' });
+      } catch (e) { /* ignore */ }
+    }
+    UI.modal({
+      title: '⚠️ ' + meta.label,
+      body: '<div class="alert ' + (h.level >= 3 ? 'danger' : 'warn') + '" style="margin-bottom:10px">检测到可能的恢复风险：' + meta.label + '（健康评分 ' + h.score + '）。</div>' +
+        mainFactorsHtml(factors) +
+        '<div class="tagline">以上为基于你记录的睡眠、晨脉与训练负荷的自动分析，不构成医疗诊断。若持续异常或伴随不适，请及时联系教练、队医或医生。</div>',
+      footer: '<button class="btn btn-primary" data-x>知道了</button>'
+    });
+  };
+  function mainFactorsHtml(factors) {
+    if (!factors.length) return '';
+    return factors.slice(0, 4).map(function (f) {
+      return '<div class="mini-row" style="align-items:flex-start"><span>●</span><span><b>' + UI.esc(f.title) + '</b>' + (f.detail ? '：' + UI.esc(f.detail) : '') + '</span></div>';
+    }).join('');
+  }
+
   /* ========================= 运动员管理 ========================= */
   Views.renderers.athletes = function (el) {
     const state = S();
@@ -199,16 +283,14 @@
     const idx = Analytics.indexByDate(state);
     const todayData = idx[Store.today()] || {};
     const alerts = [];
-    if (lastSleep && Analytics.sleepDuration(lastSleep) < (state.settings.sleepGoalH || 8)) {
-      alerts.push('<div class="alert warn">😴 昨晚睡眠 ' + fmtNum(Analytics.sleepDuration(lastSleep)) + ' h，低于目标 ' + fmtNum(state.settings.sleepGoalH) + ' h，注意今天训练负荷安排。</div>');
-    }
-    if (rhrAlert && rhrAlert.alert) {
-      alerts.push('<div class="alert danger">❤️ 晨脉 ' + lastRhr.bpm + ' bpm，高于近 7 天基线 ' + fmtNum(rhrAlert.base) + ' bpm 约 ' + fmtNum(rhrAlert.delta) + ' bpm，建议下调强度。</div>');
+    if (!state.profile || !state.profile.name) {
+      alerts.push('<div class="alert info">👤 欢迎使用！当前还没有运动员档案，建议先填写姓名、专项、身高与体重，再开始记录数据。 <button class="btn btn-sm btn-ghost" id="dashProfile" style="margin-left:6px">完善档案</button></div>');
     }
     const todayPlan = (todayData.plan || [])[0];
     if (todayPlan && !todayPlan.done) {
       alerts.push('<div class="alert info">🗓️ 今日有训练计划《' + esc(todayPlan.planName) + '》：' + esc(todayPlan.title || '训练') + '。可在「训练计划」中标记完成或转为训练日志。</div>');
     }
+    const health = Analytics.healthAnalysis(state);
 
     const recent = [];
     for (let i = 0; i < 6; i++) {
@@ -242,6 +324,7 @@
         '较上次 ' + bodyDelta, 'accent-amber') +
       '</div>' +
       (alerts.length ? '<div class="grid" style="margin-bottom:14px">' + alerts.join('') + '</div>' : '') +
+      Views.healthCardHtml(health) +
       '<div class="grid g-2" style="margin-bottom:14px">' +
       '<div class="card"><div class="card-head"><h3>😴 最近 14 天睡眠时长</h3></div><div class="chart-box" id="dashSleepChart"></div></div>' +
       '<div class="card"><div class="card-head"><h3>❤️ 最近 14 天静息心率</h3></div><div class="chart-box" id="dashRhrChart"></div></div>' +
@@ -296,6 +379,9 @@
       yLabel: 'min', height: 200, showValues: false, legend: false,
       emptyText: '暂无训练记录'
     });
+    const dashProfileBtn = document.getElementById('dashProfile');
+    if (dashProfileBtn) dashProfileBtn.onclick = function () { Views.openProfile(); };
+    Views.bindHealthNotify(el);
   };
 
   /* ========================= 通用记录行 & 删除 ========================= */
@@ -423,6 +509,7 @@
     });
 
     el.innerHTML =
+      Views.healthCardHtml(Analytics.healthAnalysis(state)) +
       '<div class="toolbar"><div class="spacer"></div><button class="btn btn-primary" id="addRhr">＋ 记录晨脉</button></div>' +
       '<div class="grid g-stats" style="margin-bottom:14px">' +
       statCard('最新晨脉', (latest ? latest.bpm + ' <small>bpm</small>' : '—'),
@@ -459,6 +546,7 @@
     });
 
     document.getElementById('addRhr').onclick = function () { openRhrForm(null); };
+    Views.bindHealthNotify(el);
     el.querySelectorAll('[data-del]').forEach(function (b) {
       b.onclick = function () { deleteRecord('rhr', b.dataset.del, '删除这条静息心率记录？'); };
     });
@@ -512,20 +600,22 @@
         latest ? '较上次 ' + (prev && latest.weight !== null && prev.weight !== null ? deltaHtml(latest.weight, prev.weight, 'kg') : '—') : '尚无记录', 'accent-amber') +
       statCard('腰围', latest && latest.waist ? fmtNum(latest.waist) + ' <small>cm</small>' : '—',
         '较上次 ' + (prev && latest.waist && prev.waist ? deltaHtml(latest.waist, prev.waist, 'cm') : '—'), 'accent-left') +
+      statCard('体脂率', latest && latest.bodyFat ? fmtNum(latest.bodyFat) + ' <small>%</small>' : '—',
+        '较上次 ' + (prev && latest.bodyFat && prev.bodyFat ? deltaHtml(latest.bodyFat, prev.bodyFat, '%') : '—'), 'accent-green') +
       statCard('体测次数', list.length + ' <small>次</small>', '最近 ' + (latest ? UI.dateCN(latest.date, true) : '—'), 'accent-teal') +
       '</div>' +
       '<div class="grid g-2" style="margin-bottom:14px">' +
       '<div class="card"><div class="card-head"><h3>⚖️ 体重趋势</h3></div><div class="chart-box" id="bodyWeightChart"></div></div>' +
       '<div class="card"><div class="card-head"><h3>📏 围度趋势</h3><select id="bodyMetricSel" style="border:1px solid #d5deea;border-radius:7px;padding:4px 8px;font-size:12px">' +
-      [['chest', '胸围'], ['waist', '腰围'], ['hip', '臀围'], ['thighL', '左大腿'], ['thighR', '右大腿'], ['calfL', '左小腿'], ['calfR', '右小腿'], ['armL', '左上臂'], ['armR', '右上臂'], ['shoulder', '肩宽'], ['neck', '颈围']].map(function (x) {
+      [['waist', '腰围'], ['bodyFat', '体脂率 (%)'], ['chest', '胸围'], ['hip', '臀围'], ['thighL', '左大腿'], ['thighR', '右大腿'], ['calfL', '左小腿'], ['calfR', '右小腿'], ['armL', '左上臂'], ['armR', '右上臂'], ['shoulder', '肩宽'], ['neck', '颈围']].map(function (x) {
         return '<option value="' + x[0] + '"' + (x[0] === 'waist' ? ' selected' : '') + '>' + x[1] + '</option>';
       }).join('') + '</select></div><div class="chart-box" id="bodyCircChart"></div></div>' +
       '</div>' +
       '<div class="card"><div class="card-head"><h3>围度记录</h3></div>' +
-      (list.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>日期</th><th class="num">体重</th><th class="num">颈</th><th class="num">肩</th><th class="num">胸</th><th class="num">腰</th><th class="num">臀</th><th class="num">左大腿</th><th class="num">右大腿</th><th class="num">左小腿</th><th class="num">右小腿</th><th class="num">左上臂</th><th class="num">右上臂</th><th></th></tr></thead><tbody>' +
+      (list.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>日期</th><th class="num">体重</th><th class="num">体脂 (%)</th><th class="num">颈</th><th class="num">肩</th><th class="num">胸</th><th class="num">腰</th><th class="num">臀</th><th class="num">左大腿</th><th class="num">右大腿</th><th class="num">左小腿</th><th class="num">右小腿</th><th class="num">左上臂</th><th class="num">右上臂</th><th></th></tr></thead><tbody>' +
         list.map(function (r) {
           return '<tr><td>' + UI.dateCN(r.date, true) + '</td>' +
-            ['weight', 'neck', 'shoulder', 'chest', 'waist', 'hip', 'thighL', 'thighR', 'calfL', 'calfR', 'armL', 'armR'].map(function (k) {
+            ['weight', 'bodyFat', 'neck', 'shoulder', 'chest', 'waist', 'hip', 'thighL', 'thighR', 'calfL', 'calfR', 'armL', 'armR'].map(function (k) {
               return '<td class="num mono">' + (r[k] !== null && r[k] !== undefined ? fmtNum(r[k]) : '—') + '</td>';
             }).join('') +
             '<td class="actions"><button class="icon-btn" data-edit="' + esc(r.id) + '">✏️</button> <button class="icon-btn" data-del="' + esc(r.id) + '">🗑</button></td></tr>';
@@ -542,10 +632,11 @@
       if (!sel) return;
       const k = sel.value;
       const label = sel.options[sel.selectedIndex].text;
+      const isPct = k === 'bodyFat';
       Charts.line(document.getElementById('bodyCircChart'), {
         labels: asc.map(function (r) { return UI.shortDate(r.date); }),
-        series: [{ name: label + ' (cm)', color: '#0ea5a4', data: asc.map(function (r) { return r[k]; }), area: true }],
-        yLabel: 'cm', height: 220, emptyText: '暂无该围度数据'
+        series: [{ name: label, color: '#0ea5a4', data: asc.map(function (r) { return r[k]; }), area: true }],
+        yLabel: isPct ? '%' : 'cm', height: 220, emptyText: '暂无该数据'
       });
     }
     drawCirc();
@@ -565,7 +656,7 @@
   };
 
   const BODY_FIELDS = [
-    ['weight', '体重 (kg)'], ['neck', '颈围 (cm)'], ['shoulder', '肩宽 (cm)'], ['chest', '胸围 (cm)'],
+    ['weight', '体重 (kg)'], ['bodyFat', '体脂率 (%)'], ['neck', '颈围 (cm)'], ['shoulder', '肩宽 (cm)'], ['chest', '胸围 (cm)'],
     ['waist', '腰围 (cm)'], ['hip', '臀围 (cm)'], ['thighL', '左大腿 (cm)'], ['thighR', '右大腿 (cm)'],
     ['calfL', '左小腿 (cm)'], ['calfR', '右小腿 (cm)'], ['armL', '左上臂 (cm)'], ['armR', '右上臂 (cm)']
   ];
@@ -841,6 +932,7 @@
         else if (tp[0] === 'body') {
           const parts = [];
           if (r.weight !== null) parts.push('体重 ' + fmtNum(r.weight) + ' kg');
+          if (r.bodyFat !== null && r.bodyFat !== undefined) parts.push('体脂 ' + fmtNum(r.bodyFat) + ' %');
           [['waist', '腰围'], ['hip', '臀围'], ['chest', '胸围'], ['thighL', '左大腿'], ['thighR', '右大腿'], ['calfL', '左小腿'], ['calfR', '右小腿']].forEach(function (x) {
             if (r[x[0]] !== null && r[x[0]] !== undefined) parts.push(x[1] + ' ' + fmtNum(r[x[0]]) + ' cm');
           });
@@ -1186,7 +1278,7 @@
       cols = ['id', 'date', 'category', 'theme', 'durationMin', 'rpe', 'fatigue', 'load', 'distance', 'content', 'notes'];
       rows = state.training; fname = 'training';
     } else if (kind === 'body') {
-      cols = ['id', 'date', 'weight', 'neck', 'shoulder', 'chest', 'waist', 'hip', 'thighL', 'thighR', 'calfL', 'calfR', 'armL', 'armR', 'note'];
+      cols = ['id', 'date', 'weight', 'bodyFat', 'neck', 'shoulder', 'chest', 'waist', 'hip', 'thighL', 'thighR', 'calfL', 'calfR', 'armL', 'armR', 'note'];
       rows = state.body; fname = 'body';
     } else if (kind === 'fv') {
       cols = ['id', 'date', 'name', 'type', 'mass', 'splits', 'note'];

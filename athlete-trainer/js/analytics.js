@@ -276,6 +276,123 @@
     return { base: +m.toFixed(1), delta: +d.toFixed(1), alert: d > (state.settings.rhrWarnDelta || 5) };
   }
 
+  /* ---------------- 智能健康分析（睡眠 + 晨脉 + 负荷） ---------------- */
+  function dstrLocal(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function healthAnalysis(state) {
+    state = state || {};
+    const goal = (state.settings && state.settings.sleepGoalH) || 8;
+    const warnDelta = (state.settings && state.settings.rhrWarnDelta) || 5;
+    const today = new Date();
+    const from = function (days) { const d = new Date(today); d.setDate(d.getDate() - days + 1); return dstrLocal(d); };
+    const between = function (arr, a, b) { return (arr || []).filter(function (r) { return r.date >= a && r.date <= b; }); };
+
+    const sleepAll = sortAscByDate(state.sleep || []);
+    const rhrAll = sortAscByDate(state.rhr || []);
+    const trAll = sortAscByDate(state.training || []);
+    const d7 = from(7), d14 = from(14);
+
+    let sleep7 = between(sleepAll, d7, dstrLocal(today));
+    if (sleep7.length < 2) sleep7 = sleepAll.slice(-7);
+    const durations = sleep7.map(sleepDuration).filter(function (v) { return v !== null; });
+    const avgSleep = mean(durations);
+    const shortNights = durations.filter(function (v) { return v < 6; }).length;
+    const sleepDebt = +durations.reduce(function (a, v) { return a + Math.max(0, goal - v); }, 0).toFixed(1);
+
+    const rhr7 = between(rhrAll, d7, dstrLocal(today));
+    const rhrPrev = between(rhrAll, d14, from(8));
+    const latest = rhrAll[rhrAll.length - 1] || null;
+    let baseline = mean(rhrPrev.map(function (r) { return r.bpm; }));
+    if (baseline === null) {
+      const withoutLatest = rhrAll.slice(0, -1).slice(-7).map(function (r) { return r.bpm; });
+      baseline = mean(withoutLatest);
+    }
+    const rhrDelta = (latest && baseline !== null) ? +(latest.bpm - baseline).toFixed(1) : null;
+    const elevatedDays = (baseline === null) ? 0 : rhr7.filter(function (r) { return r.bpm > baseline + warnDelta; }).length;
+
+    let load7 = 0, loadPrev = 0;
+    trAll.forEach(function (t) {
+      if (t.date >= d7) load7 += t.load || 0;
+      else if (t.date >= d14 && t.date < d7) loadPrev += t.load || 0;
+    });
+    const loadRatio = loadPrev > 0 ? +(load7 / loadPrev).toFixed(2) : null;
+
+    const factors = [];
+    const advice = [];
+    function add(sev, title, detail) { factors.push({ sev: sev, title: title, detail: detail || '' }); }
+
+    const enough = (durations.length >= 3 || rhr7.length >= 3);
+    let score = 100;
+
+    if (!enough) {
+      add(0, '数据不足', '记录天数不足，暂时无法进行可靠分析');
+      advice.push('继续记录，至少积累 5–7 天数据后分析更准确');
+    }
+
+    if (rhrDelta !== null) {
+      if (rhrDelta >= 12) { add(3, '晨脉异常升高', '今日晨脉 ' + latest.bpm + ' bpm，比基线高 ' + rhrDelta + ' bpm'); score -= 30; }
+      else if (rhrDelta >= 8) { add(2, '晨脉明显偏高', '今日晨脉 ' + latest.bpm + ' bpm，比基线高 ' + rhrDelta + ' bpm'); score -= 18; }
+      else if (rhrDelta >= warnDelta) { add(1, '晨脉偏高', '今日晨脉 ' + latest.bpm + ' bpm，比基线高 ' + rhrDelta + ' bpm'); score -= 8; }
+    }
+    if (elevatedDays >= 4) { add(3, '连续多日晨脉偏高', '近 7 天有 ' + elevatedDays + ' 天晨脉高于基线 ' + warnDelta + ' bpm 以上'); score -= 22; }
+    else if (elevatedDays >= 2) { add(2, '晨脉多次偏高', '近 7 天有 ' + elevatedDays + ' 天晨脉高于基线 ' + warnDelta + ' bpm 以上'); score -= 12; }
+
+    if (avgSleep !== null) {
+      if (avgSleep < 5.5) { add(3, '睡眠严重不足', '近 7 天平均睡眠仅 ' + round(avgSleep, 1) + ' h（目标 ' + goal + ' h）'); score -= 26; }
+      else if (avgSleep < 6.5) { add(2, '睡眠不足', '近 7 天平均睡眠 ' + round(avgSleep, 1) + ' h（目标 ' + goal + ' h）'); score -= 16; }
+      else if (avgSleep < goal - 0.5) { add(1, '睡眠略低于目标', '近 7 天平均睡眠 ' + round(avgSleep, 1) + ' h（目标 ' + goal + ' h）'); score -= 7; }
+    }
+    if (shortNights >= 3) { add(2, '多次睡眠少于 6 小时', '近 7 天有 ' + shortNights + ' 晚睡眠不足 6 小时'); score -= 10; }
+    if (sleepDebt >= 5) { add(2, '睡眠债累积', '近 7 天累计睡眠不足 ' + sleepDebt + ' 小时'); score -= 9; }
+    else if (sleepDebt >= 3) { add(1, '睡眠债增加', '近 7 天累计睡眠不足 ' + sleepDebt + ' 小时'); score -= 4; }
+
+    if (loadRatio !== null && loadRatio >= 1.5 && avgSleep !== null && avgSleep < 7.5) {
+      add(1, '训练负荷上升较快', '近 7 天训练负荷是上一周的 ' + loadRatio + ' 倍');
+      score -= 6;
+    }
+    if (rhrDelta !== null && rhrDelta >= warnDelta && avgSleep !== null && avgSleep < 7) {
+      add(2, '疲劳信号叠加', '晨脉升高与睡眠不足同时出现，恢复压力较大');
+      score -= 8;
+      advice.push('建议下调今日训练强度或改为主动恢复');
+    }
+    if (enough && !factors.some(function (f) { return f.sev > 0; })) {
+      add(0, '恢复状态良好', '睡眠与晨脉均在正常范围');
+    }
+
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    let level = 0;
+    factors.forEach(function (f) { if (f.sev > level) level = f.sev; });
+    if (score < 55 && level < 2) level = 2;
+    else if (score < 75 && level < 1) level = 1;
+
+    if (level >= 2) {
+      if (advice.length === 0) advice.push('建议今晚提前入睡，保证 8 小时以上睡眠');
+      if (elevatedDays >= 2 || (rhrDelta !== null && rhrDelta >= 8)) advice.push('连续偏高请及时与教练 / 队医沟通');
+    } else if (level === 1) {
+      advice.push('注意作息与恢复，今天适当控制训练强度');
+    } else if (enough) {
+      advice.push('保持当前作息与恢复节奏');
+    }
+
+    factors.sort(function (a, b) { return b.sev - a.sev; });
+    return {
+      level: level,
+      score: score,
+      enough: enough,
+      avgSleep: avgSleep === null ? null : round(avgSleep, 1),
+      shortNights: shortNights,
+      sleepDebt: sleepDebt,
+      latestRhr: latest ? latest.bpm : null,
+      baseline: baseline === null ? null : round(baseline, 1),
+      rhrDelta: rhrDelta,
+      elevatedDays: elevatedDays,
+      loadRatio: loadRatio,
+      factors: factors,
+      advice: advice
+    };
+  }
+
   return {
     G: G, round: round, mean: mean, stats: stats, linReg: linReg,
     modelTime: modelTime, modelDist: modelDist, fitMonoExp: fitMonoExp,
@@ -284,5 +401,6 @@
     monday: monday, weekKey: weekKey, weekLabel: weekLabel,
     indexByDate: indexByDate, sortDescByDate: sortDescByDate, sortAscByDate: sortAscByDate,
     dailySeries: dailySeries, sleepDuration: sleepDuration, rhrAlert: rhrAlert
+    , healthAnalysis: healthAnalysis
   };
 });

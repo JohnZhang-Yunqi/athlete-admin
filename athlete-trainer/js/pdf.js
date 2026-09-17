@@ -7,6 +7,11 @@
     sleep: '#6d5bd0', rhr: '#e25563', training: '#1b6ab0', body: '#f2a03d',
     fv: '#0ea5a4', rsi: '#16a34a', accent: '#20b3aa'
   };
+  const T = function (s) {
+    const out = (window.UI && UI.tr) ? UI.tr(s) : s;
+    if (window.__I18N_DEBUG && out && /[\u4e00-\u9fa5]/.test(String(out))) console.warn('[pdf-i18n]', out);
+    return out;
+  };
 
   function hexA(hex, alpha) {
     const n = parseInt(hex.slice(1), 16);
@@ -36,6 +41,7 @@
         return ctx;
       },
       addHeader: function (title, sub) {
+        title = T(title); sub = T(sub);
         const ctx = this.ensure();
         ctx.save();
         ctx.fillStyle = BRAND;
@@ -63,10 +69,14 @@
         ctx.fillStyle = '#9aa9ba';
         ctx.font = '10px -apple-system,sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('运动员训练管理系统 · Athlete OS — 本地生成报告  第 ' + this.pageNo + ' 页', A4W / 2, y);
+        const en = window.UI && UI.lang === 'en';
+        ctx.fillText(en
+          ? 'Athlete OS — locally generated report · Page ' + this.pageNo
+          : '运动员训练管理系统 · Athlete OS — 本地生成报告  第 ' + this.pageNo + ' 页', A4W / 2, y);
         ctx.restore();
       },
       text: function (str, x, y, o) {
+        str = T(str);
         const ctx = this.ensure();
         o = o || {};
         ctx.save();
@@ -85,6 +95,7 @@
         return y + (o.size || 13);
       },
       section: function (title, y, color) {
+        title = T(title);
         const ctx = this.ensure();
         y = y + 2;
         ctx.save();
@@ -153,6 +164,8 @@
       table: function (cols, rows, o) {
         const self = this;
         o = o || {};
+        cols = cols.map(T);
+        rows = rows.map(function (row) { return row.map(T); });
         const startX = M;
         const totalW = A4W - M * 2;
         const widths = o.widths || cols.map(function (_, i) { return totalW / cols.length; });
@@ -375,7 +388,7 @@
     if (trArr.length) notes.push('完成 ' + trArr.length + ' 次训练，累计负荷 ' + fmtNum(loadSum, 0) + ' AU（平均 ' + fmtNum(trArr.length ? loadSum / trArr.length : 0, 1) + ' AU/次）。');
     if (bodyArr.length) {
       const last = bodyArr[bodyArr.length - 1];
-      notes.push('最近一次围度测量（' + UI.dateCN(last.date) + '）：体重 ' + fmtNum(last.weight) + ' kg' + (last.waist ? '、腰围 ' + fmtNum(last.waist) + ' cm' : '') + (last.hip ? '、臀围 ' + fmtNum(last.hip) + ' cm' : '') + '。');
+      notes.push('最近一次围度测量（' + UI.dateCN(last.date) + '）：体重 ' + fmtNum(last.weight) + ' kg' + (last.bodyFat !== null && last.bodyFat !== undefined ? '、体脂 ' + fmtNum(last.bodyFat) + ' %' : '') + (last.waist ? '、腰围 ' + fmtNum(last.waist) + ' cm' : '') + (last.hip ? '、臀围 ' + fmtNum(last.hip) + ' cm' : '') + '。');
     }
     if (fvArr.length) {
       const lastFv = fvArr[fvArr.length - 1];
@@ -387,6 +400,10 @@
       const st = Analytics.sessionRSI(lastR);
       if (st) notes.push('最近 RSI 测试（' + UI.dateCN(lastR.date) + '）：最佳 ' + fmtNum(st.best, 2) + '，平均 ' + fmtNum(st.mean, 2) + '。');
     }
+    const health = Analytics.healthAnalysis(state);
+    const healthLabel = ['恢复状态良好', '需要关注', '恢复预警', '高风险警告'][health.level];
+    const healthReasons = health.factors.filter(function (f) { return f.sev > 0; }).slice(0, 3).map(function (f) { return f.title; }).join('、');
+    notes.push('健康状态分析：' + healthLabel + '（健康评分 ' + health.score + ' / 100）' + (healthReasons ? '，主要发现：' + healthReasons + '。' : '。'));
     notes.forEach(function (n) {
       y = doc.text('•  ' + n, M + 4, y, { size: 11.5, color: '#34465d', maxWidth: A4W - M * 2 - 12, lineH: 1.45 });
       y += 8;
@@ -509,11 +526,11 @@
       y = placeChart(doc, c5, y, 640, '图 5：胸 / 腰 / 臀围变化（单位 cm）');
       y = doc.section('围度明细', y, C.body);
       const bRows = Analytics.sortDescByDate(bodyArr).slice(0, 40).map(function (b) {
-        return [b.date, fmtNum(b.weight, 1), b.chest ? fmtNum(b.chest, 1) : '—', b.waist ? fmtNum(b.waist, 1) : '—', b.hip ? fmtNum(b.hip, 1) : '—',
+        return [b.date, fmtNum(b.weight, 1), (b.bodyFat !== null && b.bodyFat !== undefined) ? fmtNum(b.bodyFat, 1) : '—', b.chest ? fmtNum(b.chest, 1) : '—', b.waist ? fmtNum(b.waist, 1) : '—', b.hip ? fmtNum(b.hip, 1) : '—',
           b.thighL ? fmtNum(b.thighL, 1) : '—', b.calfL ? fmtNum(b.calfL, 1) : '—'];
       });
-      y = doc.table(['日期', '体重', '胸围', '腰围', '臀围', '左大腿', '左小腿'], bRows, {
-        y: y, fontSize: 9.5, widths: [110, 70, 70, 70, 70, 90, 90], continuedTitle: '围度明细（续）'
+      y = doc.table(['日期', '体重', '体脂', '胸围', '腰围', '臀围', '左大腿', '左小腿'], bRows, {
+        y: y, fontSize: 9.5, widths: [100, 62, 62, 62, 62, 62, 80, 80], continuedTitle: '围度明细（续）'
       });
       doc.footer();
     }

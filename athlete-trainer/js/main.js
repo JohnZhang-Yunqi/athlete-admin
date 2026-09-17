@@ -18,4 +18,9 @@
       UI.toast('已载入示例数据供预览，可在「数据管理」中清空或重新载入', 'ok');
     }, 600);
   }
+
+  // 自动健康预警：出现恢复风险时弹窗（每天最多一次），已授权时发送系统通知
+  setTimeout(function () {
+    if (Views.checkHealthAlert) Views.checkHealthAlert();
+  }, 900);
 })();

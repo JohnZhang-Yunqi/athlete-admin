@@ -2,6 +2,20 @@
 (function () {
   const PALETTE = ['#1b6ab0', '#0ea5a4', '#e25563', '#f2a03d', '#6d5bd0', '#16a34a', '#7c93ad', '#d97706'];
   const GRAY = '#8fa1b5';
+  const T = function (s) {
+    const out = (typeof window !== 'undefined' && window.UI && UI.tr) ? UI.tr(s) : s;
+    if (typeof window !== 'undefined' && window.__I18N_DEBUG && out && /[\u4e00-\u9fa5]/.test(String(out))) console.warn('[chart-i18n]', out);
+    return out;
+  };
+  function prep(cfg) {
+    if (cfg.labels) cfg.labels = cfg.labels.map(T);
+    (cfg.series || []).forEach(function (s) { if (s.name) s.name = T(s.name); });
+    if (cfg.yLabel) cfg.yLabel = T(cfg.yLabel);
+    if (cfg.xLabel) cfg.xLabel = T(cfg.xLabel);
+    if (cfg.goal && cfg.goal.label) cfg.goal.label = T(cfg.goal.label);
+    if (cfg.emptyText) cfg.emptyText = T(cfg.emptyText);
+    return cfg;
+  }
 
   function fitCanvas(canvas, cssH) {
     const dpr = window.devicePixelRatio || 1;
@@ -77,6 +91,7 @@
 
   /* ---------------- 折线图 ---------------- */
   function line(canvas, cfg) {
+    prep(cfg);
     canvas = resolveCanvas(canvas);
     const cssH = cfg.height || null;
     const { ctx, w, h } = fitCanvas(canvas, cssH);
@@ -200,6 +215,7 @@
 
   /* ---------------- 柱状图 ---------------- */
   function bar(canvas, cfg) {
+    prep(cfg);
     canvas = resolveCanvas(canvas);
     const cssH = cfg.height || null;
     const { ctx, w, h } = fitCanvas(canvas, cssH);
@@ -290,6 +306,8 @@
 
   /* ---------------- 散点 + 回归 ---------------- */
   function scatter(canvas, cfg) {
+    prep(cfg);
+    (cfg.sets || []).forEach(function (s) { if (s.name) s.name = T(s.name); });
     canvas = resolveCanvas(canvas);
     const cssH = cfg.height || null;
     const { ctx, w, h } = fitCanvas(canvas, cssH);

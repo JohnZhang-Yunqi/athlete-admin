@@ -104,7 +104,8 @@
   }
 
   function stateBadge(profile) {
-    const initials = (profile.name || 'A').trim().slice(0, 1);
+    profile = profile || {};
+    const initials = (profile.name || '新').trim().slice(0, 1) || '新';
     return '<div class="ath-avatar">' + esc(initials) + '</div><div>' +
       '<div class="t1">' + esc(profile.name || '未命名运动员') + '</div>' +
       '<div class="t2">' + esc(profile.event || '') + '</div></div>';
@@ -148,6 +149,8 @@
       });
     });
     $('#btnExportPdf').addEventListener('click', function () { window.PdfExport && window.PdfExport.showDialog(); });
+    const langBtn = $('#btnLang');
+    if (langBtn) langBtn.addEventListener('click', function () { window.I18n && I18n.toggle(); });
   }
 
   function registerHook(kind, fn) { UI.recordHooks[kind] = fn; }
@@ -162,7 +165,8 @@
     bindGlobal: bindGlobal, switchView: switchView,
     recordHooks: {}, registerHook: registerHook,
     quickLabels: quickLabels,
-    currentView: 'dashboard'
+    currentView: 'dashboard',
+    tr: function (s) { return window.I18n ? I18n.tr(s) : s; }
   };
   window.UI = UI;
   window.addEventListener('keydown', function (e) {
